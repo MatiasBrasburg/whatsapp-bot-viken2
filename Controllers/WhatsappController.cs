@@ -6,7 +6,7 @@ using Twilio.TwiML.Messaging;
 namespace WhatsappBot.Controllers
 {
     [ApiController]
-    [Route("whatsapp")]
+    [Route("api/whatsapp")] // <-- CAMBIADO para que coincida con Twilio
     public class WhatsappController : ControllerBase
     {
         [HttpPost]
@@ -14,7 +14,6 @@ namespace WhatsappBot.Controllers
         {
             var response = new MessagingResponse();
             var lowerBody = Body?.Trim().ToLower();
-
 
             // Si el cuerpo está vacío o no coincide con ninguna opción válida → mostrar menú
             if (string.IsNullOrWhiteSpace(lowerBody) ||

@@ -1,9 +1,14 @@
+using System;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var port = Environment.GetEnvironmentVariable("PORT") ?? "5000";
+builder.WebHost.UseUrls($"http://*:{port}");
+
 builder.Services.AddControllers();
 
 var app = builder.Build();
@@ -12,5 +17,4 @@ app.UseEndpoints(endpoints =>
 {
     endpoints.MapControllers();
 });
-
 app.Run();

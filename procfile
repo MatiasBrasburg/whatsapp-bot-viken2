@@ -1,1 +1,1 @@
-web: dotnet run --project ./NombreDeTuProyecto.csproj
+web: dotnet run --project ./WhatsappBot.csproj

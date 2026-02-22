@@ -1,8 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using System;
-// Asegurate de tener los using correctos si tenés las clases en carpetas separadas
-// using WhatsappBot.Services; 
+
+using System.Net.Http;   // <--- Este arregla el error de HttpClient y StringContent
+using System.Text;       // <--- Este arregla el error de Encoding
+using System.Text.Json;
+
+ 
 
 
 namespace WhatsappBot.Controllers
@@ -94,14 +98,34 @@ namespace WhatsappBot.Controllers
             
             await Task.Delay(tiempoTipeo);
 
-            // TODO: EL ÚLTIMO ESLABÓN. Acá enviaremos el HTTP POST a la API de WhatsApp no oficial
-            // await EnviarWhatsAppAsync(numeroRemitente, respuestaIA);
+           
 
             Console.WriteLine($"🤖 Respuesta enviada a {numeroRemitente}: {respuestaIA}");
 
             return Ok();
         }
+private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)
+        {
+            // PEGA ACÁ TUS CLAVES DE GREEN API
+            string idInstance = "7103525050";
+            string apiTokenInstance = "97f6947c4156485892813fbcc53c033cac597c8a9a494c24ab";
 
+            string url = $"https://api.green-api.com/waInstance{idInstance}/sendMessage/{apiTokenInstance}";
+
+            using (HttpClient client = new HttpClient())
+            {
+                var payload = new
+                {
+                    chatId = numeroChatId, // Green-API necesita que termine en @c.us
+                    message = mensaje
+                };
+
+                string jsonPayload = JsonSerializer.Serialize(payload);
+                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+                await client.PostAsync(url, content);
+            }
+        }
       
     }
 }

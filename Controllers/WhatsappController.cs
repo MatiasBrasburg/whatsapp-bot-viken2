@@ -1,13 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using System;
-
-using System.Net.Http;   // <--- Este arregla el error de HttpClient y StringContent
-using System.Text;       // <--- Este arregla el error de Encoding
+using System.Net.Http;   
+using System.Text;       
 using System.Text.Json;
-
- 
-
 
 namespace WhatsappBot.Controllers
 {
@@ -15,98 +11,93 @@ namespace WhatsappBot.Controllers
     [Route("api/whatsapp")] 
     public class WhatsappController : ControllerBase
     {
-       
-
         [HttpPost]
-        public async Task<IActionResult> ReceiveMessage([FromBody] WebhookPayload data)
+        public async Task<IActionResult> ReceiveMessage([FromBody] JsonElement payloadBruto)
         {
-            // 1. Extraemos los datos básicos limpiando espacios en blanco
-            string numeroRemitente = data.Telefono;
-            string textoMensaje = data.Mensaje?.Trim() ?? "";
-            bool loMandeYo = data.FromMe;
-
-            // =======================================================
-            // FASE 1: EL INTERCEPTOR (ADMINISTRACIÓN DEL DUEÑO)
-            // =======================================================
-            if (loMandeYo == true)
+            try
             {
-                if (textoMensaje == "APAGAR_BOT")
-                {
-                    // Apagamos para este cliente en particular (o podés hacer una función global)
-                    BD.CambiarEstadoBot(numeroRemitente); 
-                    Console.WriteLine("🛑 Bot APAGADO " );
-                    return Ok(); 
-                }
-                else if (textoMensaje == "PRENDER_BOT")
-                {
-                    BD.CambiarEstadoBot(numeroRemitente);
-                    Console.WriteLine("✅ Bot PRENDIDO " );
-                    return Ok(); 
-                }
-                else
-                {
-                    // Si vos hablás normal desde tu celular, el bot asume que tomaste el control
-                    // y se apaga automáticamente para no pisarte. (Opcional, pero muy recomendado)
-                    bool estadoActual = BD.TraerEstadoBot(numeroRemitente);
-                    if (estadoActual == true) 
-                    {
-                        BD.CambiarEstadoBot(numeroRemitente); // Lo apaga
-                    }
+                // 1. Verificamos qué tipo de aviso nos manda Green-API
+                string tipoMensaje = payloadBruto.GetProperty("typeWebhook").GetString();
+                
+                // Solo nos importan los mensajes entrantes o los que mandás vos desde tu celu
+                if (tipoMensaje != "incomingMessageReceived" && tipoMensaje != "outgoingMessageReceived") 
                     return Ok();
+
+                var messageData = payloadBruto.GetProperty("messageData");
+                
+                // Si mandan un audio o foto, por ahora lo ignoramos (solo leemos texto)
+                if (messageData.GetProperty("typeMessage").GetString() != "textMessage") 
+                    return Ok();
+
+                // 2. Extraemos el teléfono y el mensaje
+                string numeroRemitenteCompleto = payloadBruto.GetProperty("senderData").GetProperty("sender").GetString();
+                string numeroRemitente = numeroRemitenteCompleto.Replace("@c.us", ""); // Limpiamos el formato de GreenAPI
+                
+                string textoMensaje = messageData.GetProperty("textMessageData").GetProperty("textMessage").GetString().Trim();
+
+                bool loMandeYo = (tipoMensaje == "outgoingMessageReceived");
+
+                // =======================================================
+                // FASE 1: COMANDOS DEL DUEÑO
+                // =======================================================
+                if (loMandeYo)
+                {
+                    if (textoMensaje == "APAGAR_BOT")
+                    {
+                        BD.CambiarEstadoBot(numeroRemitente); 
+                        Console.WriteLine("🛑 Bot APAGADO para " + numeroRemitente);
+                        return Ok(); 
+                    }
+                    else if (textoMensaje == "PRENDER_BOT")
+                    {
+                        BD.CambiarEstadoBot(numeroRemitente);
+                        Console.WriteLine("✅ Bot PRENDIDO para " + numeroRemitente);
+                        return Ok(); 
+                    }
+                    return Ok(); // Si lo mandaste vos pero no es un comando, ignoramos
                 }
-            }
 
-            // =======================================================
-            // FASE 2: ATENCIÓN AL CLIENTE
-            // =======================================================
-            
-            // Si llegamos acá, el mensaje es de un cliente real. Lo registramos por las dudas.
-            BD.RegistrarCliente(numeroRemitente);
+                // =======================================================
+                // FASE 2: ATENCIÓN AL CLIENTE Y BASE DE DATOS
+                // =======================================================
+                BD.RegistrarCliente(numeroRemitente);
 
-            // Verificamos si el bot está prendido para él
-            bool botActivo = BD.TraerEstadoBot(numeroRemitente);
-            if (botActivo == false)
-            {
-                // El bot está silenciado para este número. Ignoramos el mensaje.
+                bool botActivo = BD.TraerEstadoBot(numeroRemitente);
+                if (botActivo == false) return Ok();
+
+                BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
+
+                // =======================================================
+                // FASE 3: EL CEREBRO (GEMINI)
+                // =======================================================
+                string historial = BD.ObtenerHistorialChat(numeroRemitente);
+                string respuestaIA = await GeminiService.ConsultarGemini(historial, textoMensaje);
+
+                BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
+
+                // =======================================================
+                // FASE 4: SIMULACIÓN HUMANA Y ENVÍO A GREEN-API
+                // =======================================================
+                int tiempoTipeo = respuestaIA.Length * 30;
+                if (tiempoTipeo > 8000) tiempoTipeo = 8000; 
+                await Task.Delay(tiempoTipeo);
+
+                await EnviarWhatsAppAsync(numeroRemitenteCompleto, respuestaIA);
+
+                Console.WriteLine($"🤖 Respuesta enviada a {numeroRemitente}: {respuestaIA}");
                 return Ok();
             }
-
-            // GUARDAMOS EL MENSAJE DEL CLIENTE EN LA BD
-            BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
-
-            // =======================================================
-            // FASE 3: EL CEREBRO (GEMINI) Y LA MEMORIA
-            // =======================================================
-            
-            // Traemos los últimos 10 mensajes para que la IA tenga contexto
-            string historial = BD.ObtenerHistorialChat(numeroRemitente);
-
-            // ¡Magia! Llamamos a Google
-            string respuestaIA = await GeminiService.ConsultarGemini(historial, textoMensaje);
-
-            // GUARDAMOS LA RESPUESTA DE LA IA EN LA BD
-            BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
-
-            // =======================================================
-            // FASE 4: SIMULACIÓN HUMANA Y ENVÍO
-            // =======================================================
-            
-            // Calculamos cuánto tardaría un humano en escribir esto (Ej: 30 milisegundos por letra)
-            int tiempoTipeo = respuestaIA.Length * 30;
-            // Ponemos un límite para que no se quede esperando 1 minuto si el texto es muy largo
-            if (tiempoTipeo > 8000) tiempoTipeo = 8000; 
-            
-            await Task.Delay(tiempoTipeo);
-
-           
-
-            Console.WriteLine($"🤖 Respuesta enviada a {numeroRemitente}: {respuestaIA}");
-
-            return Ok();
+            catch (Exception ex)
+            {
+                // Si Green-API manda algo raro, lo atajamos acá para que no explote
+                Console.WriteLine("Aviso: Formato de mensaje ignorado. " + ex.Message);
+                return Ok();
+            }
         }
-private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)
+
+        private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)
         {
-            // PEGA ACÁ TUS CLAVES DE GREEN API
+            // Tus claves de Green API (Ya las puse por vos)
             string idInstance = "7103525050";
             string apiTokenInstance = "97f6947c4156485892813fbcc53c033cac597c8a9a494c24ab";
 
@@ -116,7 +107,7 @@ private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)
             {
                 var payload = new
                 {
-                    chatId = numeroChatId, // Green-API necesita que termine en @c.us
+                    chatId = numeroChatId, 
                     message = mensaje
                 };
 
@@ -126,6 +117,5 @@ private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)
                 await client.PostAsync(url, content);
             }
         }
-      
     }
 }

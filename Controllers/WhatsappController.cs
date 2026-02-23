@@ -6,7 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq; // CLAVE PARA CONVERTIR LA COLA EN LISTA
+using System.Linq; 
 
 namespace WhatsappBot.Controllers
 {
@@ -15,7 +15,6 @@ namespace WhatsappBot.Controllers
     public class WhatsappController : ControllerBase
     {
         private static ConcurrentDictionary<string, bool> _procesandoChat = new();
-        // AHORA ES UNA COLA (CANASTA) PARA GUARDAR VARIOS AUDIOS
         private static ConcurrentDictionary<string, ConcurrentQueue<string>> _audiosPendientes = new();
 
         [HttpPost]
@@ -90,31 +89,23 @@ namespace WhatsappBot.Controllers
                     {
                         Console.WriteLine("💰 ¡OLOR A PLATA! Apagando bot y avisando al dueño...");
                         
-                        // 1. Apagamos el bot para este cliente
                         BD.CambiarEstadoBot(numeroRemitente); 
                         
-                        // 2. Le mandamos el mensaje elegante al cliente
                         string mensajeCliente = "¡Excelente! Ya dejé todo anotado. Te paso con un asesor humano para que te pase los datos de pago y coordine el envío con vos. ¡En un ratito te escribe!";
                         await EnviarWhatsAppAsync(numeroRemitenteCompleto, mensajeCliente);
                         
-                        // 3. TE AVISAMOS A VOS (Reemplazá por tu número con el formato de Green API)
-                        string tuNumero = "5491155841206@c.us"; // <-- ACÁ PONÉ EL NÚMERO DEL DUEÑO DEL LOCAL
+                        // TE AVISAMOS A VOS (Número: 5491155841206)
+                        string tuNumero = "5491155841206@c.us"; 
                         string mensajeDueño = $"🚨 *¡ALERTA DE VENTA!*\nEl número {numeroRemitente} quiere pagar o cerrar pedido. El bot ya se apagó solo. ¡Entrá al WhatsApp y pasale el Alias, campeón!";
                         await EnviarWhatsAppAsync(tuNumero, mensajeDueño);
 
-                        // 4. Guardamos en la base de datos y limpiamos
                         BD.GuardarMensajeEnBD(numeroRemitente, mensajeCliente, true);
                         _procesandoChat[numeroRemitente] = false;
-                        return; // 🛑 Cortamos la ejecución para que no haga más nada
+                        return; // 🛑 Cortamos la ejecución
                     }
                     // ------------------------------------------
 
                     // Si no es una venta, el código sigue normal
-                    BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
-                    _procesandoChat[numeroRemitente] = false; 
-
-                    await EnviarWhatsAppAsync(numeroRemitenteCompleto, respuestaIA);
-                    Console.WriteLine($"✅ ¡ÉXITO! Respuesta unificada enviada a {numeroRemitente}.");
                     BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
                     _procesandoChat[numeroRemitente] = false; 
 
@@ -130,17 +121,22 @@ namespace WhatsappBot.Controllers
                 return Ok();
             }
         }
-        
-        // ... (Tu método EnviarWhatsAppAsync queda igual abajo de esto)
-        
-        
 
 
 
 
 
 
-   
+
+
+
+
+
+
+
+
+
+
 
         private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)
         {

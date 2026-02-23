@@ -7,8 +7,9 @@ using System.Collections.Generic;
 
 public static class GeminiService
 {
-    // 1. ACÁ PONÉS TU CLAVE DE NUEVO
-    private static readonly string _apiKey = "AIzaSyBH0I-XjweqMNBwasQ5KgY1BDYDuLdLbUM"; 
+    
+// Ahora la va a ir a buscar al archivo .env mágicamente
+private static readonly string _apiKey = Environment.GetEnvironmentVariable("GEMINI_KEY");
     
     // 2. URL de Gemini 2.5 Flash
     private static string GetApiUrl() => $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={_apiKey}";
@@ -37,18 +38,30 @@ public static class GeminiService
 2. TONO: Argentino, cálido y profesional. Usá el voseo (vení, fijate, tenés, contanos).
 3. AMNESIA POSITIVA (PRIORIDAD): Ignorá cualquier error o confusión del pasado en el historial. Enfocate y respondé ÚNICAMENTE a la última intención del cliente.
 4. FLUJO DE VENTA: Terminá tu mensaje con UNA sola pregunta corta para mantener la charla viva y guiar al cliente al cierre.
-5. 🚨 COMANDO SECRETO DE VENTA: Si el cliente confirma la compra, acepta un presupuesto, pide CBU, Alias, 'pasame los datos' o 'te transfiero', NO intentes cobrarle ni seguir hablando. Tu ÚNICA respuesta debe ser EXACTAMENTE este texto y nada más: [PASAR_A_HUMANO]";
-    public static async Task<string> ConsultarGemini(string historial, List<string> urlAudios = null)
+// (Tus otras reglas)
+5. 🚨 COMANDO SECRETO DE VENTA: Si el cliente confirma la compra, acepta un presupuesto... tu ÚNICA respuesta debe ser: [PASAR_A_HUMANO].
+6. 👻 COMANDO VISTO: Si el último mensaje del cliente es solo un agradecimiento corto ('gracias', 'ok', 'dale', 'perfecto') o un cierre de conversación que NO requiere respuesta, tu ÚNICA respuesta debe ser EXACTAMENTE este texto: [IGNORAR]";
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    // AGREGADO: Recibe List<string> urlImagenes
+    public static async Task<string> ConsultarGemini(string historial, List<string> urlAudios = null, List<string> urlImagenes = null)
     {
-        string historialSeguro = string.IsNullOrWhiteSpace(historial) ? "Sin historial." : historial;
+        string historialSeguro = string.IsNullOrWhiteSpace(historial) ? "Sin historial previo." : historial;
 
         var partsList = new List<object>();
         
-        // LA TRAMPA PARA LA IA: Le encerramos el historial entre corchetes y le damos la orden final abajo.
-        string textoParaIA = $"[INICIO DEL HISTORIAL PARA DARTE CONTEXTO]\n{historialSeguro}\n[FIN DEL HISTORIAL]\n\nINSTRUCCIÓN OBLIGATORIA: Lee el historial, pero respondé EXCLUSIVAMENTE a los ÚLTIMOS mensajes del cliente. Ignorá cualquier problema de audio o confusión anterior.";
-        
+        // Si tenés el catálogo de Tiendanube metelo acá en textoParaIA, sino usá esto:
+        string textoParaIA = $"[INICIO DEL HISTORIAL]\n{historialSeguro}\n[FIN DEL HISTORIAL]\n\nINSTRUCCIÓN: Lee el historial, observá las fotos si hay, y respondé ÚNICAMENTE a los últimos mensajes.";
         partsList.Add(new { text = textoParaIA });
 
+        // PROCESAMOS AUDIOS
         if (urlAudios != null && urlAudios.Count > 0)
         {
             using (HttpClient clientAudio = new HttpClient())
@@ -58,15 +71,27 @@ public static class GeminiService
                     try
                     {
                         byte[] audioBytes = await clientAudio.GetByteArrayAsync(url);
-                        partsList.Add(new {
-                            inlineData = new {
-                                mimeType = "audio/ogg",
-                                data = Convert.ToBase64String(audioBytes) 
-                            }
-                        });
-                        Console.WriteLine("🎤 ¡Audio extra procesado y sumado al paquete!");
+                        partsList.Add(new { inlineData = new { mimeType = "audio/ogg", data = Convert.ToBase64String(audioBytes) } });
                     }
-                    catch (Exception ex) { Console.WriteLine($"❌ ERROR audio: {ex.Message}"); }
+                    catch (Exception ex) { Console.WriteLine($"❌ ERROR descargando audio: {ex.Message}"); }
+                }
+            }
+        }
+
+        // AGREGADO: PROCESAMOS FOTOS
+        if (urlImagenes != null && urlImagenes.Count > 0)
+        {
+            using (HttpClient clientImg = new HttpClient())
+            {
+                foreach (var url in urlImagenes)
+                {
+                    try
+                    {
+                        byte[] imgBytes = await clientImg.GetByteArrayAsync(url);
+                        partsList.Add(new { inlineData = new { mimeType = "image/jpeg", data = Convert.ToBase64String(imgBytes) } });
+                        Console.WriteLine("📸 ¡Foto descargada y empaquetada para Gemini!");
+                    }
+                    catch (Exception ex) { Console.WriteLine($"❌ ERROR descargando foto: {ex.Message}"); }
                 }
             }
         }
@@ -90,16 +115,33 @@ public static class GeminiService
                 string responseBody = await response.Content.ReadAsStringAsync();
                 using (JsonDocument doc = JsonDocument.Parse(responseBody))
                 {
-                    return doc.RootElement.GetProperty("candidates")[0]
-                                          .GetProperty("content")
-                                          .GetProperty("parts")[0]
-                                          .GetProperty("text").GetString()?.Trim() ?? "Sin respuesta";
+                    return doc.RootElement.GetProperty("candidates")[0].GetProperty("content").GetProperty("parts")[0].GetProperty("text").GetString()?.Trim() ?? "Sin respuesta";
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 return "Perdón, tuve un pequeño error técnico. ¿Me repetís?";
             }
         }
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 }

@@ -86,4 +86,31 @@ public static class BD
             connection.Execute(query, new { pTel = telefono, pTexto = texto, pEsBot = esBot }); 
         }
     }
+
+
+public static List<string> ObtenerClientesPendientes()
+    {
+        using (SqlConnection connection = new SqlConnection(GetConnectionString()))
+        {
+            // Esta magia de SQL busca a todos los clientes que tengan el bot prendido
+            // y cuyo ÚLTIMO mensaje guardado haya sido de ellos (EsBot = 0)
+            string query = @"
+                SELECT c.Telefono 
+                FROM Clientes c
+                CROSS APPLY (
+                    SELECT TOP 1 EsBot 
+                    FROM Mensajes m 
+                    WHERE m.Telefono = c.Telefono 
+                    ORDER BY Fecha DESC
+                ) ultMensaje
+                WHERE c.BotActivo = 1 AND ultMensaje.EsBot = 0";
+            
+            return connection.Query<string>(query).ToList();
+        }
+    }
+
+
+
+
+
 }

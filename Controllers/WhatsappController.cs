@@ -16,6 +16,7 @@ namespace WhatsappBot.Controllers
     {
         private static ConcurrentDictionary<string, bool> _procesandoChat = new();
         private static ConcurrentDictionary<string, ConcurrentQueue<string>> _audiosPendientes = new();
+        private static ConcurrentDictionary<string, ConcurrentQueue<string>> _imagenesPendientes = new(); 
 
         [HttpPost]
         public IActionResult ReceiveMessage([FromBody] JsonElement payloadBruto)
@@ -24,6 +25,18 @@ namespace WhatsappBot.Controllers
             {
                 if (!payloadBruto.TryGetProperty("typeWebhook", out JsonElement tipoWebhookElement)) return Ok();
                 string tipoMensaje = tipoWebhookElement.GetString() ?? "";
+
+                // --- 📞 CHICHE: EL ATAJADOR DE LLAMADAS ---
+                if (tipoMensaje == "incomingCall")
+                {
+                    string numeroLlamador = payloadBruto.GetProperty("from").GetString() ?? "";
+                    Console.WriteLine($"📞 ¡Llamada rechazada del ansioso: {numeroLlamador}!");
+                    
+                    _ = EnviarWhatsAppAsync(numeroLlamador, "¡Hola! 🚫 Disculpá, pero esta línea es solo para mensajes de texto y audios. Escribime tu consulta por acá y te atiendo en un ratito. ¡Gracias!");
+                    return Ok();
+                }
+                // -------------------------------------------------
+
                 if (tipoMensaje != "incomingMessageReceived" && tipoMensaje != "outgoingMessageReceived") return Ok();
 
                 var messageData = payloadBruto.GetProperty("messageData");
@@ -31,6 +44,7 @@ namespace WhatsappBot.Controllers
                 
                 string textoMensaje = "";
                 string urlAudio = "";
+                string urlImagen = "";
 
                 if (typeMessage == "textMessage")
                     textoMensaje = messageData.GetProperty("textMessageData").GetProperty("textMessage").GetString() ?? "";
@@ -41,6 +55,11 @@ namespace WhatsappBot.Controllers
                     urlAudio = messageData.GetProperty("fileMessageData").GetProperty("downloadUrl").GetString() ?? "";
                     textoMensaje = "[El usuario envió un mensaje de audio]";
                 }
+                else if (typeMessage == "imageMessage")
+                {
+                    urlImagen = messageData.GetProperty("fileMessageData").GetProperty("downloadUrl").GetString() ?? "";
+                    textoMensaje = "[El usuario envió una imagen de referencia]";
+                }
                 else return Ok(); 
 
                 string numeroRemitenteCompleto = payloadBruto.GetProperty("senderData").GetProperty("sender").GetString() ?? "";
@@ -49,43 +68,74 @@ namespace WhatsappBot.Controllers
 
                 if (tipoMensaje == "outgoingMessageReceived") return Ok(); 
 
+                // --- 🌙 CHICHE: HORARIO COMERCIAL ---
+                DateTime horaArg = DateTime.UtcNow.AddHours(-3); 
+                if (horaArg.Hour < 9 || horaArg.Hour >= 20) 
+                {
+                    Console.WriteLine($"🌙 Fuera de hora ({horaArg.Hour}hs). El bot se hace el dormido con {numeroRemitente}.");
+                    BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
+                    return Ok(); 
+                }
+                // ------------------------------------
+
                 BD.RegistrarCliente(numeroRemitente);
                 if (BD.TraerEstadoBot(numeroRemitente) == false) return Ok();
 
                 BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
                 
-                // ATAJAMOS MULTIPLES AUDIOS EN LA COLA
+                // ATAJAMOS MULTIPLES AUDIOS
                 if (!string.IsNullOrEmpty(urlAudio))
                 {
                     var colaAudios = _audiosPendientes.GetOrAdd(numeroRemitente, _ => new ConcurrentQueue<string>());
                     colaAudios.Enqueue(urlAudio);
                 }
 
+                // ATAJAMOS MULTIPLES FOTOS
+                if (!string.IsNullOrEmpty(urlImagen))
+                {
+                    var colaImagenes = _imagenesPendientes.GetOrAdd(numeroRemitente, _ => new ConcurrentQueue<string>());
+                    colaImagenes.Enqueue(urlImagen);
+                }
+
                 if (_procesandoChat.TryGetValue(numeroRemitente, out bool estaProcesando) && estaProcesando)
                 {
-                    Console.WriteLine("⏳ Entró otro mensaje/audio. Seguimos esperando los 40s...");
+                    Console.WriteLine("⏳ Entró otro mensaje/audio/foto. Seguimos esperando...");
                     return Ok(); 
                 }
 
                 _procesandoChat[numeroRemitente] = true;
-                Console.WriteLine("⏳ PRIMER MENSAJE. Lanzando cronómetro de 40s...");
+                Console.WriteLine("⏳ PRIMER MENSAJE. Lanzando proceso en segundo plano...");
 
                 _ = Task.Run(async () => 
                 {
-                    await Task.Delay(40000); 
+                    // --- 🚨 MENSAJE ANTI-ANSIEDAD ---
+                    string mjeEspera = "👀 _Dame un segundito que estoy leyendo lo que me mandaste y ya te respondo..._";
+                    await EnviarWhatsAppAsync(numeroRemitenteCompleto, mjeEspera);
+                    // --------------------------------
+
+                    // --- 🎲 CHICHE NUEVO: TIEMPO DE ESPERA RANDOM ---
+                    Random rnd = new Random();
+                    // 40 segs = 40.000 | 6 mins = 360.000
+                    int tiempoEsperaRandom = rnd.Next(40000, 360000); 
+                    
+                    Console.WriteLine($"🎲 [Modo Humano] Esperando {tiempoEsperaRandom / 1000} segundos antes de responder a {numeroRemitente}...");
+                    await Task.Delay(tiempoEsperaRandom);
+                    // ------------------------------------------------
 
                     string historial = BD.ObtenerHistorialChat(numeroRemitente);
                     
-                    // SACAMOS TODOS LOS AUDIOS JUNTOS Y VACIAMOS LA CANASTA
                     _audiosPendientes.TryRemove(numeroRemitente, out var audiosExtraidos);
                     List<string> listaAudios = audiosExtraidos != null ? audiosExtraidos.ToList() : new List<string>();
 
-                    Console.WriteLine($"🤖 Pasaron 40s. Consultando a Gemini con {listaAudios.Count} audios...");
-                    string respuestaIA = await GeminiService.ConsultarGemini(historial, listaAudios);
+                    _imagenesPendientes.TryRemove(numeroRemitente, out var imagenesExtraidas);
+                    List<string> listaImagenes = imagenesExtraidas != null ? imagenesExtraidas.ToList() : new List<string>();
 
+                    Console.WriteLine($"🤖 Terminó la espera. Consultando a Gemini con {listaAudios.Count} audios y {listaImagenes.Count} fotos...");
+                    
+                    string respuestaIA = await GeminiService.ConsultarGemini(historial, listaAudios, listaImagenes);
 
                     // --- 🚨 MAGIA SAAS: EL PASE A HUMANO 🚨 ---
-                    if (respuestaIA.Contains("[PASAR_A_HUMANO]"))
+                    if (respuestaIA.Contains("APAGAR_BOT") || respuestaIA.Contains("[PASAR_A_HUMANO]"))
                     {
                         Console.WriteLine("💰 ¡OLOR A PLATA! Apagando bot y avisando al dueño...");
                         
@@ -94,7 +144,6 @@ namespace WhatsappBot.Controllers
                         string mensajeCliente = "¡Excelente! Ya dejé todo anotado. Te paso con un asesor humano para que te pase los datos de pago y coordine el envío con vos. ¡En un ratito te escribe!";
                         await EnviarWhatsAppAsync(numeroRemitenteCompleto, mensajeCliente);
                         
-                        // TE AVISAMOS A VOS (Número: 5491155841206)
                         string tuNumero = "5491155841206@c.us"; 
                         string mensajeDueño = $"🚨 *¡ALERTA DE VENTA!*\nEl número {numeroRemitente} quiere pagar o cerrar pedido. El bot ya se apagó solo. ¡Entrá al WhatsApp y pasale el Alias, campeón!";
                         await EnviarWhatsAppAsync(tuNumero, mensajeDueño);
@@ -105,12 +154,11 @@ namespace WhatsappBot.Controllers
                     }
                     // ------------------------------------------
 
-                    // Si no es una venta, el código sigue normal
                     BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
                     _procesandoChat[numeroRemitente] = false; 
 
                     await EnviarWhatsAppAsync(numeroRemitenteCompleto, respuestaIA);
-                    Console.WriteLine($"✅ ¡ÉXITO! Respuesta unificada enviada a {numeroRemitente}.");
+                    Console.WriteLine($"✅ ¡ÉXITO! Respuesta enviada a {numeroRemitente}.");
                 });
 
                 return Ok(); 
@@ -122,26 +170,10 @@ namespace WhatsappBot.Controllers
             }
         }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)
         {
-            string idInstance = "7103525050";
-            string apiTokenInstance = "97f6947c4156485892813fbcc53c033cac597c8a9a494c24ab";
+            string idInstance = Environment.GetEnvironmentVariable("GREEN_API_INSTANCE");
+            string apiTokenInstance = Environment.GetEnvironmentVariable("GREEN_API_TOKEN");
             string url = $"https://api.green-api.com/waInstance{idInstance}/sendMessage/{apiTokenInstance}";
 
             using (HttpClient client = new HttpClient())

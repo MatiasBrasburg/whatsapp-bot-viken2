@@ -5,6 +5,8 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Linq; // CLAVE PARA CONVERTIR LA COLA EN LISTA
 
 namespace WhatsappBot.Controllers
 {
@@ -12,12 +14,12 @@ namespace WhatsappBot.Controllers
     [Route("api/whatsapp")]
     public class WhatsappController : ControllerBase
     {
-        // Diccionarios en memoria para manejar la "Sala de Espera" y atrapar audios
         private static ConcurrentDictionary<string, bool> _procesandoChat = new();
-        private static ConcurrentDictionary<string, string> _ultimoAudio = new();
+        // AHORA ES UNA COLA (CANASTA) PARA GUARDAR VARIOS AUDIOS
+        private static ConcurrentDictionary<string, ConcurrentQueue<string>> _audiosPendientes = new();
 
         [HttpPost]
-        public IActionResult ReceiveMessage([FromBody] JsonElement payloadBruto) // OJO: Le sacamos el "async Task" de arriba
+        public IActionResult ReceiveMessage([FromBody] JsonElement payloadBruto)
         {
             try
             {
@@ -38,7 +40,7 @@ namespace WhatsappBot.Controllers
                 else if (typeMessage == "audioMessage")
                 {
                     urlAudio = messageData.GetProperty("fileMessageData").GetProperty("downloadUrl").GetString() ?? "";
-                    textoMensaje = "[El cliente envió un audio]";
+                    textoMensaje = "[El usuario envió un mensaje de audio]";
                 }
                 else return Ok(); 
 
@@ -46,47 +48,81 @@ namespace WhatsappBot.Controllers
                 string numeroRemitente = numeroRemitenteCompleto.Replace("@c.us", ""); 
                 textoMensaje = textoMensaje.Trim();
 
-                if (tipoMensaje == "outgoingMessageReceived") return Ok(); // Lo simplifico para no dar vueltas
+                if (tipoMensaje == "outgoingMessageReceived") return Ok(); 
 
                 BD.RegistrarCliente(numeroRemitente);
                 if (BD.TraerEstadoBot(numeroRemitente) == false) return Ok();
 
-                // 1. Guardamos cada mensaje que va llegando
                 BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
-                if (!string.IsNullOrEmpty(urlAudio)) _ultimoAudio[numeroRemitente] = urlAudio;
+                
+                // ATAJAMOS MULTIPLES AUDIOS EN LA COLA
+                if (!string.IsNullOrEmpty(urlAudio))
+                {
+                    var colaAudios = _audiosPendientes.GetOrAdd(numeroRemitente, _ => new ConcurrentQueue<string>());
+                    colaAudios.Enqueue(urlAudio);
+                }
 
-                // 2. LA MAGIA DE LOS 40 SEGUNDOS (Patovica de la puerta)
                 if (_procesandoChat.TryGetValue(numeroRemitente, out bool estaProcesando) && estaProcesando)
                 {
-                    Console.WriteLine("⏳ Entró otro mensaje. Se guardó en BD. Seguimos en los 40s...");
-                    return Ok(); // Ya hay un cronómetro corriendo, nos vamos.
+                    Console.WriteLine("⏳ Entró otro mensaje/audio. Seguimos esperando los 40s...");
+                    return Ok(); 
                 }
 
                 _procesandoChat[numeroRemitente] = true;
-                Console.WriteLine("⏳ PRIMER MENSAJE. Lanzando cronómetro de 40s de fondo...");
+                Console.WriteLine("⏳ PRIMER MENSAJE. Lanzando cronómetro de 40s...");
 
-                // 3. TAREA DE FONDO (Para no colgar el Webhook)
                 _ = Task.Run(async () => 
                 {
-                    await Task.Delay(40000); // Los 40s que pediste
+                    await Task.Delay(40000); 
 
                     string historial = BD.ObtenerHistorialChat(numeroRemitente);
-                    _ultimoAudio.TryGetValue(numeroRemitente, out string audioParaGemini);
-
-                    Console.WriteLine("🤖 Pasaron 40s. Consultando a Gemini...");
-                    string respuestaIA = await GeminiService.ConsultarGemini(historial, audioParaGemini);
-
-                    BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
                     
-                    // Apagamos semáforo y limpiamos audio
-                    _procesandoChat[numeroRemitente] = false;
-                    _ultimoAudio[numeroRemitente] = "";
+                    // SACAMOS TODOS LOS AUDIOS JUNTOS Y VACIAMOS LA CANASTA
+                    _audiosPendientes.TryRemove(numeroRemitente, out var audiosExtraidos);
+                    List<string> listaAudios = audiosExtraidos != null ? audiosExtraidos.ToList() : new List<string>();
+
+                    Console.WriteLine($"🤖 Pasaron 40s. Consultando a Gemini con {listaAudios.Count} audios...");
+                    string respuestaIA = await GeminiService.ConsultarGemini(historial, listaAudios);
+
+
+                    // --- 🚨 MAGIA SAAS: EL PASE A HUMANO 🚨 ---
+                    if (respuestaIA.Contains("[PASAR_A_HUMANO]"))
+                    {
+                        Console.WriteLine("💰 ¡OLOR A PLATA! Apagando bot y avisando al dueño...");
+                        
+                        // 1. Apagamos el bot para este cliente
+                        BD.CambiarEstadoBot(numeroRemitente); 
+                        
+                        // 2. Le mandamos el mensaje elegante al cliente
+                        string mensajeCliente = "¡Excelente! Ya dejé todo anotado. Te paso con un asesor humano para que te pase los datos de pago y coordine el envío con vos. ¡En un ratito te escribe!";
+                        await EnviarWhatsAppAsync(numeroRemitenteCompleto, mensajeCliente);
+                        
+                        // 3. TE AVISAMOS A VOS (Reemplazá por tu número con el formato de Green API)
+                        string tuNumero = "5491155841206@c.us"; // <-- ACÁ PONÉ EL NÚMERO DEL DUEÑO DEL LOCAL
+                        string mensajeDueño = $"🚨 *¡ALERTA DE VENTA!*\nEl número {numeroRemitente} quiere pagar o cerrar pedido. El bot ya se apagó solo. ¡Entrá al WhatsApp y pasale el Alias, campeón!";
+                        await EnviarWhatsAppAsync(tuNumero, mensajeDueño);
+
+                        // 4. Guardamos en la base de datos y limpiamos
+                        BD.GuardarMensajeEnBD(numeroRemitente, mensajeCliente, true);
+                        _procesandoChat[numeroRemitente] = false;
+                        return; // 🛑 Cortamos la ejecución para que no haga más nada
+                    }
+                    // ------------------------------------------
+
+                    // Si no es una venta, el código sigue normal
+                    BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
+                    _procesandoChat[numeroRemitente] = false; 
+
+                    await EnviarWhatsAppAsync(numeroRemitenteCompleto, respuestaIA);
+                    Console.WriteLine($"✅ ¡ÉXITO! Respuesta unificada enviada a {numeroRemitente}.");
+                    BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
+                    _procesandoChat[numeroRemitente] = false; 
 
                     await EnviarWhatsAppAsync(numeroRemitenteCompleto, respuestaIA);
                     Console.WriteLine($"✅ ¡ÉXITO! Respuesta unificada enviada a {numeroRemitente}.");
                 });
 
-                return Ok(); // Le decimos a Green API "OK" instantáneamente.
+                return Ok(); 
             }
             catch (Exception ex)
             {
@@ -95,13 +131,15 @@ namespace WhatsappBot.Controllers
             }
         }
         
+        // ... (Tu método EnviarWhatsAppAsync queda igual abajo de esto)
+        
         
 
 
 
 
 
-        
+
    
 
         private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)

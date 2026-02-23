@@ -1,22 +1,26 @@
 using Microsoft.AspNetCore.Mvc;
 using System.Threading.Tasks;
 using System;
-using System.Net.Http;   
-using System.Text;       
+using System.Net.Http;
+using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace WhatsappBot.Controllers
 {
     [ApiController]
-    [Route("api/whatsapp")] 
+    [Route("api/whatsapp")]
     public class WhatsappController : ControllerBase
     {
+        // Diccionarios en memoria para manejar la "Sala de Espera" y atrapar audios
+        private static ConcurrentDictionary<string, bool> _procesandoChat = new();
+        private static ConcurrentDictionary<string, string> _ultimoAudio = new();
+
         [HttpPost]
-        public async Task<IActionResult> ReceiveMessage([FromBody] JsonElement payloadBruto)
+        public IActionResult ReceiveMessage([FromBody] JsonElement payloadBruto) // OJO: Le sacamos el "async Task" de arriba
         {
             try
             {
-                // Leemos con cuidado para evitar errores de campos vacíos
                 if (!payloadBruto.TryGetProperty("typeWebhook", out JsonElement tipoWebhookElement)) return Ok();
                 string tipoMensaje = tipoWebhookElement.GetString() ?? "";
                 if (tipoMensaje != "incomingMessageReceived" && tipoMensaje != "outgoingMessageReceived") return Ok();
@@ -25,56 +29,64 @@ namespace WhatsappBot.Controllers
                 string typeMessage = messageData.GetProperty("typeMessage").GetString() ?? "";
                 
                 string textoMensaje = "";
+                string urlAudio = "";
+
                 if (typeMessage == "textMessage")
                     textoMensaje = messageData.GetProperty("textMessageData").GetProperty("textMessage").GetString() ?? "";
                 else if (typeMessage == "extendedTextMessage") 
                     textoMensaje = messageData.GetProperty("extendedTextMessageData").GetProperty("text").GetString() ?? "";
-                else 
-                    return Ok(); 
+                else if (typeMessage == "audioMessage")
+                {
+                    urlAudio = messageData.GetProperty("fileMessageData").GetProperty("downloadUrl").GetString() ?? "";
+                    textoMensaje = "[El cliente envió un audio]";
+                }
+                else return Ok(); 
 
                 string numeroRemitenteCompleto = payloadBruto.GetProperty("senderData").GetProperty("sender").GetString() ?? "";
                 string numeroRemitente = numeroRemitenteCompleto.Replace("@c.us", ""); 
-                
                 textoMensaje = textoMensaje.Trim();
-                bool loMandeYo = (tipoMensaje == "outgoingMessageReceived");
 
-                if (loMandeYo)
+                if (tipoMensaje == "outgoingMessageReceived") return Ok(); // Lo simplifico para no dar vueltas
+
+                BD.RegistrarCliente(numeroRemitente);
+                if (BD.TraerEstadoBot(numeroRemitente) == false) return Ok();
+
+                // 1. Guardamos cada mensaje que va llegando
+                BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
+                if (!string.IsNullOrEmpty(urlAudio)) _ultimoAudio[numeroRemitente] = urlAudio;
+
+                // 2. LA MAGIA DE LOS 40 SEGUNDOS (Patovica de la puerta)
+                if (_procesandoChat.TryGetValue(numeroRemitente, out bool estaProcesando) && estaProcesando)
                 {
-                    if (textoMensaje == "APAGAR_BOT") { BD.CambiarEstadoBot(numeroRemitente); return Ok(); }
-                    else if (textoMensaje == "PRENDER_BOT") { BD.CambiarEstadoBot(numeroRemitente); return Ok(); }
-                    return Ok(); 
+                    Console.WriteLine("⏳ Entró otro mensaje. Se guardó en BD. Seguimos en los 40s...");
+                    return Ok(); // Ya hay un cronómetro corriendo, nos vamos.
                 }
 
-                Console.WriteLine("\n====================================");
-                Console.WriteLine("📍 PASO 1: Conectando a BD (Registrar Cliente)...");
-                BD.RegistrarCliente(numeroRemitente);
+                _procesandoChat[numeroRemitente] = true;
+                Console.WriteLine("⏳ PRIMER MENSAJE. Lanzando cronómetro de 40s de fondo...");
 
-                Console.WriteLine("📍 PASO 2: Verificando estado del bot...");
-                bool botActivo = BD.TraerEstadoBot(numeroRemitente);
-                if (botActivo == false) return Ok();
+                // 3. TAREA DE FONDO (Para no colgar el Webhook)
+                _ = Task.Run(async () => 
+                {
+                    await Task.Delay(40000); // Los 40s que pediste
 
-                Console.WriteLine("📍 PASO 3: Guardando mensaje del cliente...");
-                BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
+                    string historial = BD.ObtenerHistorialChat(numeroRemitente);
+                    _ultimoAudio.TryGetValue(numeroRemitente, out string audioParaGemini);
 
-                Console.WriteLine("📍 PASO 4: Obteniendo historial de chat...");
-                string historial = BD.ObtenerHistorialChat(numeroRemitente);
+                    Console.WriteLine("🤖 Pasaron 40s. Consultando a Gemini...");
+                    string respuestaIA = await GeminiService.ConsultarGemini(historial, audioParaGemini);
 
-                Console.WriteLine("📍 PASO 5: Consultando a la IA (Gemini)...");
-                string respuestaIA = await GeminiService.ConsultarGemini(historial, textoMensaje);
+                    BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
+                    
+                    // Apagamos semáforo y limpiamos audio
+                    _procesandoChat[numeroRemitente] = false;
+                    _ultimoAudio[numeroRemitente] = "";
 
-                Console.WriteLine("📍 PASO 6: Guardando respuesta de la IA...");
-                BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true);
+                    await EnviarWhatsAppAsync(numeroRemitenteCompleto, respuestaIA);
+                    Console.WriteLine($"✅ ¡ÉXITO! Respuesta unificada enviada a {numeroRemitente}.");
+                });
 
-                Console.WriteLine("📍 PASO 7: Enviando mensaje por WhatsApp...");
-                int tiempoTipeo = respuestaIA.Length * 30;
-                if (tiempoTipeo > 8000) tiempoTipeo = 8000; 
-                await Task.Delay(tiempoTipeo);
-
-                await EnviarWhatsAppAsync(numeroRemitenteCompleto, respuestaIA);
-
-                Console.WriteLine($"✅ ¡ÉXITO! Respuesta enviada a {numeroRemitente}.");
-                Console.WriteLine("====================================\n");
-                return Ok();
+                return Ok(); // Le decimos a Green API "OK" instantáneamente.
             }
             catch (Exception ex)
             {
@@ -82,6 +94,15 @@ namespace WhatsappBot.Controllers
                 return Ok();
             }
         }
+        
+        
+
+
+
+
+
+        
+   
 
         private async Task EnviarWhatsAppAsync(string numeroChatId, string mensaje)
         {

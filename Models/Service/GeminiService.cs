@@ -7,15 +7,14 @@ using System.Collections.Generic;
 
 public static class GeminiService
 {
-    
-// Ahora la va a ir a buscar al archivo .env mágicamente
-private static readonly string _apiKey = Environment.GetEnvironmentVariable("GEMINI_KEY");
+    // Ahora la va a ir a buscar al archivo .env mágicamente
+    private static readonly string _apiKey = Environment.GetEnvironmentVariable("GEMINI_KEY");
     
     // 2. URL de Gemini 2.5 Flash
     private static string GetApiUrl() => $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={_apiKey}";
     
     // 3. EL BOZAL MEJORADO (Regla 7 es la clave)
-  private static readonly string _systemPrompt = @"Sos un asesor de ventas experto de Viken Home (Impresión 3D ecológica en Buenos Aires). Tu nombre es Juan, Mariela, Agustina o Romina (elegí uno y presentate solo una vez).
+    private static readonly string _systemPrompt = @"Sos un asesor de ventas experto de Viken Home (Impresión 3D ecológica en Buenos Aires). Tu nombre es Juan, Mariela, Agustina o Romina (elegí uno y presentate solo una vez).
 
 === BASE DE CONOCIMIENTO Y POLÍTICAS DE LA EMPRESA ===
 - Identidad: Transformamos 'casas' en 'hogares' con diseño de autor y tecnología de impresión 3D.
@@ -38,18 +37,12 @@ private static readonly string _apiKey = Environment.GetEnvironmentVariable("GEM
 2. TONO: Argentino, cálido y profesional. Usá el voseo (vení, fijate, tenés, contanos).
 3. AMNESIA POSITIVA (PRIORIDAD): Ignorá cualquier error o confusión del pasado en el historial. Enfocate y respondé ÚNICAMENTE a la última intención del cliente.
 4. FLUJO DE VENTA: Terminá tu mensaje con UNA sola pregunta corta para mantener la charla viva y guiar al cliente al cierre.
-// (Tus otras reglas)
 5. 🚨 COMANDO SECRETO DE VENTA: Si el cliente confirma la compra, acepta un presupuesto... tu ÚNICA respuesta debe ser: [PASAR_A_HUMANO].
-6. 👻 COMANDO VISTO: Si el último mensaje del cliente es solo un agradecimiento corto ('gracias', 'ok', 'dale', 'perfecto') o un cierre de conversación que NO requiere respuesta, tu ÚNICA respuesta debe ser EXACTAMENTE este texto: [IGNORAR]";
-    
-    
-    
-    
-    
-    
-    
-    
-    
+6. 👻 COMANDO VISTO: Si el último mensaje del cliente es solo un agradecimiento corto ('gracias', 'ok', 'dale', 'perfecto') o un cierre de conversación que NO requiere respuesta, tu ÚNICA respuesta debe ser EXACTAMENTE este texto: [IGNORAR].
+7. 🏷️ ETIQUETADO DE DATOS: Al final de tu respuesta (incluso si usas [PASAR_A_HUMANO] o [IGNORAR]), agrega SIEMPRE una etiqueta oculta con el tema principal de la charla. Formato exacto: [CAT: Tema]. 
+Ejemplos de temas: [CAT: Floreros], [CAT: Macetas], [CAT: Envíos], [CAT: Precios], [CAT: Personalizados], [CAT: Otro].
+Ejemplo tuyo: '¡Hola! Sí, hacemos envíos gratis a partir de $85.000. [CAT: Envíos]'";
+
     // AGREGADO: Recibe List<string> urlImagenes
     public static async Task<string> ConsultarGemini(string historial, List<string> urlAudios = null, List<string> urlImagenes = null)
     {
@@ -57,7 +50,6 @@ private static readonly string _apiKey = Environment.GetEnvironmentVariable("GEM
 
         var partsList = new List<object>();
         
-        // Si tenés el catálogo de Tiendanube metelo acá en textoParaIA, sino usá esto:
         string textoParaIA = $"[INICIO DEL HISTORIAL]\n{historialSeguro}\n[FIN DEL HISTORIAL]\n\nINSTRUCCIÓN: Lee el historial, observá las fotos si hay, y respondé ÚNICAMENTE a los últimos mensajes.";
         partsList.Add(new { text = textoParaIA });
 
@@ -78,7 +70,7 @@ private static readonly string _apiKey = Environment.GetEnvironmentVariable("GEM
             }
         }
 
-        // AGREGADO: PROCESAMOS FOTOS
+        // PROCESAMOS FOTOS
         if (urlImagenes != null && urlImagenes.Count > 0)
         {
             using (HttpClient clientImg = new HttpClient())
@@ -124,24 +116,4 @@ private static readonly string _apiKey = Environment.GetEnvironmentVariable("GEM
             }
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }

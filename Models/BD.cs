@@ -111,6 +111,56 @@ public static List<string> ObtenerClientesPendientes()
 
 
 
+public static void GuardarMensajeEnBD(string telefono, string texto, bool esBot, string categoria = null)
+    {
+        using (SqlConnection connection = new SqlConnection(GetConnectionString()))
+        {
+            // Modificamos el Insert para que ataje la categoría (si le pasamos una)
+            string query = "INSERT INTO Mensajes (Telefono, Texto, EsBot, Fecha, Categoria) VALUES (@pTel, @pTexto, @pEsBot, GETDATE(), @pCat)";
+            connection.Execute(query, new { pTel = telefono, pTexto = texto, pEsBot = esBot, pCat = categoria }); 
+        }
+    }
 
+    public static void ConfigurarReporte(bool activar)
+    {
+        using (SqlConnection connection = new SqlConnection(GetConnectionString()))
+        {
+            // 1. Magia Negra: Si la tabla Mensajes no tiene la columna 'Categoria', la crea sola.
+            string queryColumna = @"IF NOT EXISTS(SELECT 1 FROM sys.columns WHERE Name = N'Categoria' AND Object_ID = Object_ID(N'Mensajes'))
+                                    ALTER TABLE Mensajes ADD Categoria NVARCHAR(100) NULL";
+            connection.Execute(queryColumna);
+
+            // 2. Guarda tu configuración
+            string queryTabla = @"IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='Configuracion' and xtype='U') CREATE TABLE Configuracion (Clave varchar(50) PRIMARY KEY, Valor varchar(50))";
+            connection.Execute(queryTabla);
+
+            string queryUpdate = @"IF EXISTS (SELECT 1 FROM Configuracion WHERE Clave='ReporteDiario') UPDATE Configuracion SET Valor = @val WHERE Clave='ReporteDiario' ELSE INSERT INTO Configuracion (Clave, Valor) VALUES ('ReporteDiario', @val)";
+            connection.Execute(queryUpdate, new { val = activar ? "1" : "0" });
+        }
+    }
+
+    // Actualizamos el reporte para que lea las categorías
+    public static (int clientes, int ventas, string topTemas, string topVentas) ObtenerMetricasDelDia()
+    {
+        try
+        {
+            using (SqlConnection connection = new SqlConnection(GetConnectionString()))
+            {
+                int clientes = connection.QueryFirstOrDefault<int>("SELECT COUNT(DISTINCT Telefono) FROM Mensajes WHERE CAST(Fecha AS DATE) = CAST(GETDATE() AS DATE) AND EsBot = 0");
+                int ventas = connection.QueryFirstOrDefault<int>("SELECT COUNT(*) FROM Mensajes WHERE CAST(Fecha AS DATE) = CAST(GETDATE() AS DATE) AND EsBot = 1 AND Texto LIKE '%asesor humano%'");
+                
+                // Busca de qué se habló más hoy
+                var topConsultas = connection.Query("SELECT TOP 3 Categoria, COUNT(*) as Cantidad FROM Mensajes WHERE CAST(Fecha AS DATE) = CAST(GETDATE() AS DATE) AND Categoria IS NOT NULL AND EsBot = 1 GROUP BY Categoria ORDER BY Cantidad DESC").ToList();
+                // Busca qué temas terminaron en PASE_A_HUMANO
+                var topVentas = connection.Query("SELECT TOP 3 Categoria, COUNT(*) as Cantidad FROM Mensajes WHERE CAST(Fecha AS DATE) = CAST(GETDATE() AS DATE) AND Texto LIKE '%asesor humano%' AND Categoria IS NOT NULL GROUP BY Categoria ORDER BY Cantidad DESC").ToList();
+
+                string strConsultas = topConsultas.Any() ? string.Join(", ", topConsultas.Select(x => $"{x.Categoria} ({x.Cantidad})")) : "Ninguno claro";
+                string strVentas = topVentas.Any() ? string.Join(", ", topVentas.Select(x => $"{x.Categoria} ({x.Cantidad})")) : "Ninguno claro";
+
+                return (clientes, ventas, strConsultas, strVentas);
+            }
+        }
+        catch { return (0, 0, "Error", "Error"); }
+    }
 
 }

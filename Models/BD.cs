@@ -78,14 +78,6 @@ public static class BD
         }
     }
 
-    public static void GuardarMensajeEnBD(string telefono, string texto, bool esBot)
-    {
-        using (SqlConnection connection = new SqlConnection(GetConnectionString()))
-        {
-            string query = "INSERT INTO Mensajes (Telefono, Texto, EsBot, Fecha) VALUES (@pTel, @pTexto, @pEsBot, GETDATE())";
-            connection.Execute(query, new { pTel = telefono, pTexto = texto, pEsBot = esBot }); 
-        }
-    }
 
 
 public static List<string> ObtenerClientesPendientes()

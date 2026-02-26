@@ -30,6 +30,8 @@ public static class GeminiService
 - [EJEMPLO] Maquetas arquitectónicas: Desde $15.000 (depende escala y detalles).
 - [EJEMPLO] Organizadores de escritorio: Desde $8.000.
 - [EJEMPLO] Floreros decorativos (no aptos agua caliente): Desde $12.000.
+- [EJEMPLO] Florero Perth de impresión 3D (9,5x12cm) en material biodegradable blanco con puntitos negros y acabado mate.
+Diseño minimalista para flores secas, fabricado artesanalmente con recursos vegetales y estética sofisticada de autor.
 (Nota para la IA: Si el cliente pide algo que no está acá, decile que lo podemos diseñar a medida o mandalo a revisar la tienda online vikenhome3.mitiendanube.com).
 
 === REGLAS ESTRICTAS E INQUEBRANTABLES ===

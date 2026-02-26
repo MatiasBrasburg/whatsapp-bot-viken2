@@ -155,4 +155,26 @@ public static void GuardarMensajeEnBD(string telefono, string texto, bool esBot,
         catch { return (0, 0, "Error", "Error"); }
     }
 
+
+
+
+
+
+
+
+public static void ReactivarBot(string telefono)
+{
+    using (SqlConnection connection = new SqlConnection(_connectionString))
+    {
+        connection.Open();
+        string query = "UPDATE Clientes SET EstadoBot = 1 WHERE Telefono = @Telefono";
+        connection.Execute(query, new { Telefono = telefono });
+    }
+}
+
+
+
+
+
+
 }

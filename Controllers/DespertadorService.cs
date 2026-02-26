@@ -82,7 +82,7 @@ public class DespertadorService : BackgroundService
             // --- 📊 TURNO NOCHE: 20:05 PM (Reporte Diario) ---
             else if (horaArg.Hour == 20 && horaArg.Minute == 5)
             {
-                if (BD.ReporteActivado())
+                //if (BD.ReporteActivado())
                 {
                     Console.WriteLine("📊 Generando reporte diario para el dueño...");
                     var metricas = BD.ObtenerMetricasDelDia();

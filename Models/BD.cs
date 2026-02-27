@@ -164,7 +164,7 @@ public static void GuardarMensajeEnBD(string telefono, string texto, bool esBot,
 
 public static void ReactivarBot(string telefono)
 {
-    using (SqlConnection connection = new SqlConnection(_connectionString))
+    using (SqlConnection connection = new SqlConnection(GetConnectionString()))
     {
         connection.Open();
         string query = "UPDATE Clientes SET EstadoBot = 1 WHERE Telefono = @Telefono";

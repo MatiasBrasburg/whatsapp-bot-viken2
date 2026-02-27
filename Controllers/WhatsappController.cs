@@ -149,8 +149,8 @@ BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
 
                 _ = Task.Run(async () => 
                 {
-                    string mjeEspera = "👀 _Dame un segundito que estoy leyendo lo que me mandaste y ya te respondo..._";
-                    await EnviarWhatsAppAsync(numeroRemitenteCompleto, mjeEspera);
+                   
+
 
                     Random rnd = new Random();
                     int tiempoEsperaRandom = rnd.Next(40000, 360000); 

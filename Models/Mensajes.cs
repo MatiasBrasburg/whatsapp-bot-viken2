@@ -13,5 +13,12 @@ public bool EsBot {get; private set;}
 
 public DateTime Fecha {get; private set;}
 
+public string Categoria {get; private set;}
+
+
+public Mensajes (){
+    
+}
+
 
 }

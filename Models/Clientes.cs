@@ -7,6 +7,9 @@ public bool BotActivo {get; private set;}
 
 
 
-
+public Cliente()
+    {
+        
+    }
 
 }

@@ -100,31 +100,37 @@ namespace WhatsappBot.Controllers
 
                 BD.RegistrarCliente(numeroRemitente);
                 
-                if (BD.TraerEstadoBot(numeroRemitente) == false) return Ok();
+              
 // Acá termina tu código del Horario Comercial...
 
 
 
 // --- 🟢 CHICHE: REACTIVAR BOT MANUALMENTE ---
-if (textoMensaje.ToLower() == "prender bot")
-{
-    Console.WriteLine($"♻️ {numeroRemitente} pidió reactivar el bot.");
-    BD.ReactivarBot(numeroRemitente); 
-    _ = EnviarWhatsAppAsync(numeroRemitenteCompleto, "🤖 *¡Bot reactivado!* Hola de nuevo, ¿en qué te puedo ayudar?");
-    return Ok(); 
-}
-// --------------------------------------------
+BD.RegistrarCliente(numeroRemitente);
+                
+                // ❌ BORRÁ ESTA LÍNEA QUE TENÍAS ACÁ:
+                // if (BD.TraerEstadoBot(numeroRemitente) == false) return Ok();
 
-// Cambiá el if que tenías por este con el Console.WriteLine así no te volvés loco adivinando
-if (BD.TraerEstadoBot(numeroRemitente) == false) 
-{
-    Console.WriteLine($"🔇 Bot APAGADO para {numeroRemitente}. Me hago el sordo.");
-    return Ok(); 
-}
+                // --- 🟢 CHICHE: REACTIVAR BOT MANUALMENTE ---
+                if (textoMensaje.ToLower() == "prender bot")
+                {
+                    Console.WriteLine($"♻️ {numeroRemitente} pidió reactivar el bot.");
+                    BD.CambiarEstadoBot(numeroRemitente); 
+                    _ = EnviarWhatsAppAsync(numeroRemitenteCompleto, "🤖 *¡Bot reactivado!* Hola de nuevo, ¿en qué te puedo ayudar?");
+                    return Ok(); 
+                }
+                // --------------------------------------------
+
+                // ✅ ESTE ES EL FRENO QUE VALE (después de revisar si quiso prenderlo)
+                if (BD.TraerEstadoBot(numeroRemitente) == false) 
+                {
+                    Console.WriteLine($"🔇 Bot APAGADO para {numeroRemitente}. Me hago el sordo.");
+                    return Ok(); 
+                }
 
 BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
 // Acá sigue el código de las colas de audio e imagen...
-                BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
+                
                 
                 if (!string.IsNullOrEmpty(urlAudio))
                 {
@@ -155,7 +161,7 @@ BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
                     Random rnd = new Random();
                     int tiempoEsperaRandom = rnd.Next(40000, 360000); 
                     
-                    Console.WriteLine($"🎲 [Modo Humano] Esperando {tiempoEsperaRandom / 1000} segundos antes de responder a {numeroRemitente}...");
+                    Console.WriteLine($" Esperando {tiempoEsperaRandom / 1000} segundos antes de responder a {numeroRemitente}...");
                     await Task.Delay(tiempoEsperaRandom);
 
                     string historial = BD.ObtenerHistorialChat(numeroRemitente);

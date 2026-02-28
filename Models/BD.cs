@@ -17,8 +17,13 @@ public static class BD
     {
         using (SqlConnection connection = new SqlConnection(GetConnectionString()))
         {
+            // Traemos los últimos 10, del más nuevo al más viejo
             string query = @"SELECT TOP 10 Texto, EsBot FROM Mensajes WHERE Telefono = @pTelefono ORDER BY Fecha DESC";
             var mensajes = connection.Query<dynamic>(query, new { pTelefono = telefono }).ToList();
+            
+            // MAGIA ACÁ: Damos vuelta la lista para que quede cronológica (del más viejo al más nuevo)
+            mensajes.Reverse(); 
+
             string historial = "";
             foreach (var m in mensajes)
             {

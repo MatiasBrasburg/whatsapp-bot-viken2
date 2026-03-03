@@ -12,7 +12,7 @@ using System.Text.RegularExpressions; // AGREGADO: Para buscar las etiquetas [CA
 namespace WhatsappBot.Controllers
 {
     [ApiController]
-    [Route("api/whatsapp")]
+    [Route("whatsapp/webhook")] // <-- ACÁ LA SOLUCIÓN
     public class WhatsappController : ControllerBase
     {
         private static ConcurrentDictionary<string, bool> _procesandoChat = new();
@@ -90,10 +90,10 @@ namespace WhatsappBot.Controllers
 
                 // --- 🌙 CHICHE: HORARIO COMERCIAL ---
                 DateTime horaArg = DateTime.UtcNow.AddHours(-3); 
-                if (horaArg.Hour < 9 || horaArg.Hour >= 20) 
+                if (horaArg.Hour < 21 || horaArg.Hour >= 9 ) 
                 {
                     Console.WriteLine($"🌙 Fuera de hora ({horaArg.Hour}hs). El bot se hace el dormido con {numeroRemitente}.");
-                    BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
+                BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
                     return Ok(); 
                 }
                 // ------------------------------------
@@ -159,7 +159,7 @@ BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
 
 
                     Random rnd = new Random();
-                    int tiempoEsperaRandom = rnd.Next(40000, 360000); 
+                    int tiempoEsperaRandom = rnd.Next(10000, 40000); 
                     
                     Console.WriteLine($" Esperando {tiempoEsperaRandom / 1000} segundos antes de responder a {numeroRemitente}...");
                     await Task.Delay(tiempoEsperaRandom);
@@ -206,11 +206,30 @@ BD.GuardarMensajeEnBD(numeroRemitente, textoMensaje, false);
                     }
                     // ------------------------------------------
 
-                    BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true, categoriaDetectada);
-                    _procesandoChat[numeroRemitente] = false; 
+                    // --- ACÁ METEMOS LA MAGIA MULTI-MENSAJE ---
+// 1. Guardamos todo el texto entero en la BD para que quede el registro completo
+BD.GuardarMensajeEnBD(numeroRemitente, respuestaIA, true, categoriaDetectada);
+_procesandoChat[numeroRemitente] = false; 
 
-                    await EnviarWhatsAppAsync(numeroRemitenteCompleto, respuestaIA);
-                    Console.WriteLine($"✅ ¡ÉXITO! Respuesta enviada a {numeroRemitente}.");
+// 2. Cortamos la respuesta de la IA en varios "globitos" usando los palitos ||
+string[] mensajesSeparados = respuestaIA.Split("||", StringSplitOptions.RemoveEmptyEntries);
+
+// 3. Mandamos los globitos uno por uno
+foreach (var globito in mensajesSeparados)
+{
+    string mensajeLimpio = globito.Trim();
+    if (string.IsNullOrWhiteSpace(mensajeLimpio)) continue;
+
+    // Simulamos que el bot está "escribiendo"
+    int tiempoTipeo = mensajeLimpio.Length * 30;
+    if (tiempoTipeo > 5000) tiempoTipeo = 5000; 
+    await Task.Delay(tiempoTipeo);
+
+    await EnviarWhatsAppAsync(numeroRemitenteCompleto, mensajeLimpio);
+}
+
+Console.WriteLine($"✅ ¡ÉXITO! {mensajesSeparados.Length} mensajes enviados a {numeroRemitente}.");
+// ------------------------------------------
                 });
 
                 return Ok(); 
